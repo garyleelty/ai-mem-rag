@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChromaDB 文档管理器</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🗄️ ChromaDB 文档管理器</h1>
+        </header>
+
+        <div class="grid layout">
+            <!-- 左侧配置面板 -->
+            <aside class="config-panel">
+                <h3>📁 配置面板</h3>
+
+                <label for="collectionSelect">目标集合</label>
+                <select id="collectionSelect">
+                    <option value="">请选择集合</option>
+                </select>
+
+                <div class="grid" style="margin-top: 0.5rem;">
+                    <input type="text" id="newCollectionName" placeholder="新集合名称">
+                    <button id="createCollectionBtn" class="secondary">+ 新建</button>
+                </div>
+
+                <label for="chunkSize">分块大小</label>
+                <select id="chunkSize">
+                    <option value="500">500 字符</option>
+                    <option value="1000" selected>1000 字符</option>
+                    <option value="2000">2000 字符</option>
+                </select>
+
+                <button id="uploadBtn" class="upload-btn">🚀 上传</button>
+                <input type="file" id="fileInput" multiple accept=".pdf,.docx" style="display: none;">
+            </aside>
+
+            <!-- 中间上传区域 -->
+            <section class="upload-area" id="dropZone">
+                <div class="drop-zone-inner">
+                    <p>📤 拖拽文件到此处</p>
+                    <p class="text-muted">支持 PDF / DOCX</p>
+                    <button class="outline" onclick="document.getElementById('fileInput').click()">
+                        📁 选择文件
+                    </button>
+                </div>
+                <div id="uploadStatus" class="upload-status" style="display: none;">
+                    <span class="spinner"></span>
+                    <span id="uploadStatusText">正在处理...</span>
+                </div>
+            </section>
+
+            <!-- 右侧文档列表 -->
+            <aside class="doc-panel">
+                <h3>📚 文档浏览</h3>
+                <label for="docCollectionSelect">集合</label>
+                <select id="docCollectionSelect">
+                    <option value="">请选择集合</option>
+                </select>
+
+                <div id="documentList" class="document-list">
+                    <p class="text-muted">暂无文档</p>
+                </div>
+                <div id="docCount" class="doc-count"></div>
+            </aside>
+        </div>
+
+        <!-- 底部预览区 -->
+        <section class="preview-panel" id="previewPanel" style="display: none;">
+            <h3>📋 文档内容预览</h3>
+            <div id="previewHeader" class="preview-header"></div>
+            <div id="previewContent" class="preview-content"></div>
+        </section>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
