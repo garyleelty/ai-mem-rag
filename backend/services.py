@@ -5,7 +5,7 @@ from datetime import datetime
 
 import chromadb
 from sentence_transformers import SentenceTransformer
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 from docx import Document
 
 from config import CHROMA_DIR, UPLOAD_DIR, EMBEDDING_MODEL, EMBEDDING_DEVICE, ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE_BYTES
@@ -61,9 +61,20 @@ def parse_pdf(file_path: Path) -> str:
 def parse_docx(file_path: Path) -> str:
     doc = Document(str(file_path))
     texts = []
+
     for para in doc.paragraphs:
         if para.text.strip():
             texts.append(para.text)
+
+    for table in doc.tables:
+        table_texts = []
+        for row in table.rows:
+            row_texts = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+            if row_texts:
+                table_texts.append(" | ".join(row_texts))
+        if table_texts:
+            texts.append("\n".join(table_texts))
+
     return "\n\n".join(texts)
 
 def simple_split(text: str, chunk_size: int = 1000) -> list[str]:
@@ -121,6 +132,7 @@ def process_file(file, collection_name: str, chunk_size: int = 1000):
             {
                 "source": file.filename,
                 "doc_id": doc_id,
+                "collection_name": collection_name,
                 "chunk_index": i,
                 "total_chunks": len(chunks),
                 "created_at": datetime.now().isoformat(),
@@ -196,49 +208,65 @@ def get_document_chunks(document_id: str):
     client = get_chroma_client()
     collections = client.list_collections()
 
+    target_collection = None
     for col in collections:
         try:
             result = col.get(
                 where={"doc_id": document_id},
-                include=["documents", "metadatas"],
+                include=["metadatas"],
+                limit=1,
             )
             if result and result.get("ids"):
-                docs = result.get("documents") or []
-                metas = result.get("metadatas") or []
-                ids = result.get("ids") or []
-
-                chunks = []
-                for i, chunk_id in enumerate(ids):
-                    meta = metas[i] if i < len(metas) else {}
-                    chunks.append({
-                        "chunk_id": chunk_id,
-                        "index": meta.get("chunk_index", i),
-                        "content": docs[i] if i < len(docs) else "",
-                    })
-                chunks.sort(key=lambda x: x["index"])
-
-                source = metas[0].get("source", "unknown") if metas else "unknown"
-                return {
-                    "document_id": document_id,
-                    "document_name": source,
-                    "chunks": chunks,
-                }
+                target_collection = col
+                break
         except Exception:
             continue
 
-    raise ValueError(f"文档不存在: {document_id}")
+    if target_collection is None:
+        raise ValueError(f"文档不存在: {document_id}")
+
+    result = target_collection.get(
+        where={"doc_id": document_id},
+        include=["documents", "metadatas"],
+    )
+    docs = result.get("documents") or []
+    metas = result.get("metadatas") or []
+    ids = result.get("ids") or []
+
+    chunks = []
+    for i, chunk_id in enumerate(ids):
+        meta = metas[i] if i < len(metas) else {}
+        chunks.append({
+            "chunk_id": chunk_id,
+            "index": meta.get("chunk_index", i),
+            "content": docs[i] if i < len(docs) else "",
+        })
+    chunks.sort(key=lambda x: x["index"])
+
+    source = metas[0].get("source", "unknown") if metas else "unknown"
+    return {
+        "document_id": document_id,
+        "document_name": source,
+        "chunks": chunks,
+    }
 
 def delete_document(document_id: str):
     client = get_chroma_client()
     collections = client.list_collections()
 
+    target_collection = None
     for col in collections:
         try:
-            result = col.get(where={"doc_id": document_id})
+            result = col.get(where={"doc_id": document_id}, limit=1)
             if result and result.get("ids"):
-                col.delete(ids=result["ids"])
-                return True
+                target_collection = col
+                break
         except Exception:
             continue
 
-    raise ValueError(f"文档不存在: {document_id}")
+    if target_collection is None:
+        raise ValueError(f"文档不存在: {document_id}")
+
+    result = target_collection.get(where={"doc_id": document_id})
+    target_collection.delete(ids=result["ids"])
+    return True

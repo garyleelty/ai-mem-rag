@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:8000/api/v1';
+const API_BASE = (window.API_BASE_URL || 'http://localhost:8000') + '/api/v1';
 
 const AppState = {
     collections: [],
@@ -26,6 +26,9 @@ const els = {
     previewPanel: document.getElementById('previewPanel'),
     previewHeader: document.getElementById('previewHeader'),
     previewContent: document.getElementById('previewContent'),
+    closePreview: document.getElementById('closePreview'),
+    connStatus: document.getElementById('connStatus'),
+    segments: document.querySelectorAll('.segment'),
 };
 
 // API 请求辅助函数
@@ -38,14 +41,23 @@ async function api(url, options = {}) {
     return res.json();
 }
 
+// 更新连接状态
+function setConnectionStatus(status, text) {
+    if (!els.connStatus) return;
+    els.connStatus.className = 'status-badge ' + status;
+    els.connStatus.textContent = text;
+}
+
 // 加载集合列表
 async function loadCollections() {
     try {
         const data = await api('/collections');
         AppState.collections = data.collections || [];
+        setConnectionStatus('connected', '已连接');
         renderCollectionSelects();
     } catch (e) {
         console.error('加载集合失败:', e);
+        setConnectionStatus('error', '连接失败');
     }
 }
 
@@ -60,7 +72,6 @@ function renderCollectionSelects() {
     els.collectionSelect.innerHTML = html;
     els.docCollectionSelect.innerHTML = html;
 
-    // 恢复选中状态
     if (AppState.selectedCollection) {
         els.collectionSelect.value = AppState.selectedCollection;
         els.docCollectionSelect.value = AppState.selectedCollection;
@@ -82,7 +93,6 @@ async function createCollection() {
         });
         els.newCollectionName.value = '';
         await loadCollections();
-        // 自动选中新集合
         AppState.selectedCollection = name;
         renderCollectionSelects();
         await loadDocuments();
@@ -95,7 +105,7 @@ async function createCollection() {
 async function loadDocuments() {
     const collection = els.docCollectionSelect.value;
     if (!collection) {
-        els.documentList.innerHTML = '<p class="text-muted">请选择集合</p>';
+        renderEmptyState('选择集合并上传文件');
         els.docCount.textContent = '';
         return;
     }
@@ -106,25 +116,38 @@ async function loadDocuments() {
         renderDocuments();
     } catch (e) {
         console.error('加载文档失败:', e);
-        els.documentList.innerHTML = '<p class="text-muted">加载失败</p>';
+        renderEmptyState('加载失败，请重试');
     }
+}
+
+function renderEmptyState(hint) {
+    els.documentList.innerHTML = `
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+            </svg>
+            <p>暂无文档</p>
+            <span>${hint}</span>
+        </div>
+    `;
 }
 
 // 渲染文档列表
 function renderDocuments() {
     if (AppState.documents.length === 0) {
-        els.documentList.innerHTML = '<p class="text-muted">暂无文档</p>';
+        renderEmptyState('选择集合并上传文件');
         els.docCount.textContent = '';
         return;
     }
 
     const html = AppState.documents.map(doc => `
         <div class="doc-item ${doc.id === AppState.previewDocId ? 'active' : ''}" data-id="${doc.id}">
-            <div class="doc-name">📄 ${escapeHtml(doc.source)}</div>
-            <div class="doc-meta">${doc.chunk_count} 块 · ${formatDate(doc.created_at)}</div>
+            <div class="doc-name">${escapeHtml(doc.source)}</div>
+            <div class="doc-meta">${doc.chunk_count} 个分块 · ${formatDate(doc.created_at)}</div>
             <div class="doc-actions">
-                <button class="outline view-btn" data-id="${doc.id}">查看</button>
-                <button class="outline secondary delete-btn" data-id="${doc.id}">删除</button>
+                <button class="view-btn" data-id="${doc.id}">查看内容</button>
+                <button class="delete-btn" data-id="${doc.id}">删除</button>
             </div>
         </div>
     `).join('');
@@ -132,7 +155,6 @@ function renderDocuments() {
     els.documentList.innerHTML = html;
     els.docCount.textContent = `共 ${AppState.documents.length} 个文档`;
 
-    // 绑定事件
     document.querySelectorAll('.view-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -155,22 +177,29 @@ function renderDocuments() {
 // 加载文档分块
 async function loadDocumentChunks(docId) {
     AppState.previewDocId = docId;
-    renderDocuments(); // 更新 active 状态
+    renderDocuments();
 
     try {
         const data = await api(`/documents/${docId}/chunks`);
         els.previewPanel.style.display = 'block';
-        els.previewHeader.textContent = `文档: ${data.document_name} | 总块数: ${data.chunks.length}`;
+        els.previewHeader.textContent = `${data.document_name} · 共 ${data.chunks.length} 个分块`;
         els.previewContent.innerHTML = data.chunks.map(chunk => `
             <div class="chunk-item">
-                <div class="chunk-index">块 #${chunk.index + 1}</div>
+                <div class="chunk-index">分块 ${chunk.index + 1}</div>
                 <div class="chunk-text">${escapeHtml(chunk.content)}</div>
             </div>
         `).join('');
-        els.previewPanel.scrollIntoView({ behavior: 'smooth' });
+        els.previewPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch (e) {
         alert('加载文档内容失败: ' + e.message);
     }
+}
+
+// 关闭预览
+function closePreviewPanel() {
+    AppState.previewDocId = null;
+    els.previewPanel.style.display = 'none';
+    renderDocuments();
 }
 
 // 删除文档
@@ -180,11 +209,9 @@ async function deleteDocument(docId) {
     try {
         await api(`/documents/${docId}`, { method: 'DELETE' });
         if (AppState.previewDocId === docId) {
-            AppState.previewDocId = null;
-            els.previewPanel.style.display = 'none';
+            closePreviewPanel();
         }
-        await loadDocuments();
-        await loadCollections(); // 更新集合计数
+        await Promise.all([loadDocuments(), loadCollections()]);
     } catch (e) {
         alert('删除失败: ' + e.message);
     }
@@ -201,6 +228,10 @@ async function uploadFiles(files) {
     if (AppState.isUploading) return;
     AppState.isUploading = true;
     els.uploadStatus.style.display = 'flex';
+    els.dropZone.querySelector('.upload-placeholder').style.display = 'none';
+
+    let successCount = 0;
+    let failCount = 0;
 
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
@@ -222,20 +253,24 @@ async function uploadFiles(files) {
                 }
                 return res.json();
             });
+            successCount++;
         } catch (e) {
-            alert(`上传 ${file.name} 失败: ${e.message}`);
+            failCount++;
+            console.error(`上传 ${file.name} 失败:`, e.message);
         }
     }
 
     els.uploadStatus.style.display = 'none';
+    els.dropZone.querySelector('.upload-placeholder').style.display = 'flex';
     AppState.isUploading = false;
     els.fileInput.value = '';
 
-    // 刷新列表
-    await loadDocuments();
-    await loadCollections();
+    if (failCount > 0) {
+        alert(`上传完成: ${successCount} 个成功, ${failCount} 个失败`);
+    }
 
-    // 如果当前文档列表显示的集合和上传目标一致，保持选中
+    await Promise.all([loadDocuments(), loadCollections()]);
+
     if (els.docCollectionSelect.value !== collection) {
         els.docCollectionSelect.value = collection;
         AppState.selectedCollection = collection;
@@ -253,11 +288,15 @@ function escapeHtml(text) {
 function formatDate(iso) {
     if (!iso) return '';
     const d = new Date(iso);
-    return d.toLocaleString('zh-CN');
+    return d.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 // 事件绑定
 els.createCollectionBtn.addEventListener('click', createCollection);
+
+els.newCollectionName.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') createCollection();
+});
 
 els.collectionSelect.addEventListener('change', (e) => {
     AppState.selectedCollection = e.target.value;
@@ -271,6 +310,15 @@ els.docCollectionSelect.addEventListener('change', (e) => {
     loadDocuments();
 });
 
+// 分段控制器
+els.segments.forEach(seg => {
+    seg.addEventListener('click', () => {
+        els.segments.forEach(s => s.classList.remove('active'));
+        seg.classList.add('active');
+        els.chunkSize.value = seg.dataset.value;
+    });
+});
+
 els.uploadBtn.addEventListener('click', () => {
     els.fileInput.click();
 });
@@ -280,6 +328,8 @@ els.fileInput.addEventListener('change', (e) => {
         uploadFiles(Array.from(e.target.files));
     }
 });
+
+els.closePreview.addEventListener('click', closePreviewPanel);
 
 // 拖拽上传
 els.dropZone.addEventListener('dragover', (e) => {
