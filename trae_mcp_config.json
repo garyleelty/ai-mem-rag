@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "ai-memory-rag": {
+      "command": [
+        "python",
+        "-m",
+        "mcp.main"
+      ],
+      "cwd": "/Users/tianyi/code/ai-mem-rag",
+      "env": {
+        "PYTHONPATH": "/Users/tianyi/code/ai-mem-rag"
+      }
+    }
+  }
+}
