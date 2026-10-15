@@ -1,4 +1,3 @@
-import uuid
 import json
 from datetime import datetime
 from typing import Optional
@@ -19,46 +18,9 @@ from models.schemas import (
     QASearchResponse,
     QASearchResult,
 )
-from services import get_embedding_model, get_chroma_client
+from services.search import index_qa_record, delete_qa_index, batch_index_qa_records, search_qa, find_similar
 
 router = APIRouter(prefix="/api/v1/qa", tags=["qa_records"])
-
-QA_COLLECTION_NAME = "qa_records"
-
-
-def _ensure_qa_collection():
-    client = get_chroma_client()
-    return client.get_or_create_collection(name=QA_COLLECTION_NAME)
-
-
-def _index_qa_record(record: QARecord):
-    collection = _ensure_qa_collection()
-    text = f"{record.question}\n{record.answer}"
-    embedding = get_embedding_model().encode([text])[0]
-    doc_id = f"qa_{record.id}"
-    collection.add(
-        ids=[doc_id],
-        embeddings=[embedding.tolist()],
-        documents=[text],
-        metadatas=[{
-            "source": "qa_record",
-            "qa_id": str(record.id),
-            "user_id": str(record.user_id),
-            "conversation_id": str(record.conversation_id) if record.conversation_id else "",
-            "question_preview": record.question[:100],
-            "created_at": record.created_at.isoformat() if record.created_at else datetime.utcnow().isoformat(),
-        }],
-    )
-    return doc_id
-
-
-def _delete_qa_index(record_id: int):
-    collection = _ensure_qa_collection()
-    doc_id = f"qa_{record_id}"
-    try:
-        collection.delete(ids=[doc_id])
-    except Exception:
-        pass
 
 
 @router.post("/records", response_model=QARecordResponse)
@@ -91,10 +53,10 @@ def create_qa_record(
     db.refresh(record)
 
     try:
-        chroma_doc_id = _index_qa_record(record)
+        chroma_doc_id = index_qa_record(record)
         record.chroma_doc_id = chroma_doc_id
         db.commit()
-    except Exception as e:
+    except Exception:
         pass
 
     return record
@@ -169,7 +131,7 @@ def delete_qa_record(
     if not record:
         raise HTTPException(status_code=404, detail="QA record not found")
 
-    _delete_qa_index(record_id)
+    delete_qa_index(record_id)
     db.delete(record)
     db.commit()
     return {"message": "QA record deleted"}
@@ -217,7 +179,7 @@ def import_qa_records(
             db.flush()
 
             try:
-                chroma_doc_id = _index_qa_record(record)
+                chroma_doc_id = index_qa_record(record)
                 record.chroma_doc_id = chroma_doc_id
             except Exception:
                 pass
@@ -240,19 +202,10 @@ def search_qa_records(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    collection = _ensure_qa_collection()
-    embedding = get_embedding_model().encode([body.query])[0]
-
-    where_filter = {"user_id": str(current_user.id)}
-    if body.conversation_id:
-        where_filter["conversation_id"] = str(body.conversation_id)
-
-    results = collection.query(
-        query_embeddings=[embedding.tolist()],
-        n_results=body.top_k,
-        where=where_filter,
-        include=["metadatas", "distances"],
-    )
+    try:
+        results = search_qa(body.query, current_user.id, body.top_k, body.conversation_id)
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Embedding model unavailable")
 
     items = []
     if results and results.get("ids") and results["ids"][0]:
@@ -276,7 +229,7 @@ def search_qa_records(
 
 
 @router.get("/similar/{record_id}", response_model=QASearchResponse)
-def find_similar(
+def find_similar_records(
     record_id: int,
     top_k: int = Query(5, ge=1, le=20),
     db: Session = Depends(get_db),
@@ -290,16 +243,10 @@ def find_similar(
     if not record:
         raise HTTPException(status_code=404, detail="QA record not found")
 
-    text = f"{record.question}\n{record.answer}"
-    embedding = get_embedding_model().encode([text])[0]
-    collection = _ensure_qa_collection()
-
-    results = collection.query(
-        query_embeddings=[embedding.tolist()],
-        n_results=top_k + 1,
-        where={"user_id": str(current_user.id)},
-        include=["metadatas", "distances"],
-    )
+    try:
+        results = find_similar(record, current_user.id, top_k)
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Embedding model unavailable")
 
     items = []
     if results and results.get("ids") and results["ids"][0]:

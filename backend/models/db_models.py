@@ -102,3 +102,15 @@ class PresetTag(Base):
     color = Column(String, default="#3b82f6")
     category = Column(String, default="general")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class DocumentIndex(Base):
+    __tablename__ = "document_indices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    chroma_doc_id = Column(String, unique=True, nullable=False, index=True)
+    collection_name = Column(String, nullable=False, index=True)
+    filename = Column(String)
+    chunk_count = Column(Integer, default=0)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)

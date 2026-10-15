@@ -27,3 +27,10 @@ data/chroma_storage/*
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs（之前被误跟踪，不应该进版本库）
+*.log
+
+# 本地 SQLite 数据（含测试期间的真实数据）
+data/app.db
+data/*.db
